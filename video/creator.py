@@ -293,7 +293,7 @@ def _render_hook(draw, section, t, duration):
     title = section.get("title", "")
     if t > 0.3:
         a = min(1.0, (t - 0.3) / 0.4)
-        _shadow_text(draw, (60, 50), "▶ FRACTURED TIMELINES",
+        _shadow_text(draw, (60, 50), "▶ " + config.CHANNEL_NAME.upper(),
                      _load_font("regular", 24), fill=_alpha(C["accent"], a), shadow_offset=2)
     sentences = [s.strip() for s in narr.replace("...", "…").split(".") if s.strip()]
     first_two = ". ".join(sentences[:2]) + ("." if sentences else "")
@@ -659,70 +659,63 @@ def _get_caption_at(captions: list, t_global: float) -> str:
     return ""
 
 
-def _build_shorts_clip(all_images: list, total_duration: float,
+_PROGRESS_EVERY = 0  # seconds of video between progress prints; 0 = silent
+
+
+def _build_shorts_clip(section_shots: list, sections: list, total_duration: float,
                        captions: list) -> VideoClip:
     """
-    Builds the full Shorts video as one VideoClip with smooth crossfades
-    between images instead of hard cuts.
+    Section-aware Shorts builder.
 
-    How crossfading works inside a single VideoClip make_frame():
-      Each image occupies a slot of SHORTS_IMG_DURATION seconds.
-      During the last CROSSFADE_DURATION seconds of a slot, we linearly
-      blend the current image (zoomed) with the next image (zoomed from t=0)
-      using alpha = (img_t - crossfade_start) / CROSSFADE_DURATION.
-      This is equivalent to what moviepy's crossfadein/crossfadeout do,
-      but computed inline so we stay in a single VideoClip (much faster
-      to render than concatenating dozens of small clips with transitions).
+    Each section's image(s) stay on screen for the whole time that section
+    is narrated — timing estimated from word counts, scaled to the true
+    audio duration — instead of a fixed 2.5 s rotation looping all images.
+    Visuals are shown clearly with only a light dim so charts stay readable;
+    a short crossfade eases the handoff between sections.
     """
-    n_imgs    = len(all_images) if all_images else 0
-    xfade_dur = float(getattr(config, "CROSSFADE_DURATION", 0.7))
-    # Clamp so fade never exceeds half the image slot (avoids triple-blend)
-    xfade_dur = min(xfade_dur, SHORTS_IMG_DURATION * 0.45)
+    # ── Section time windows: proportional to narration word counts ──
+    words   = [max(1, len(s.get("narration", "").split())) for s in sections]
+    total_w = sum(words)
+    bounds  = [0.0]
+    for w in words:
+        bounds.append(bounds[-1] + total_duration * w / total_w)
+
+    XFADE = 0.6   # crossfade seconds at each section boundary
+    DIM   = 0.15  # light dim — keeps charts/text clearly readable
+
+    def _section_at(t):
+        for i in range(len(sections)):
+            if t < bounds[i + 1]:
+                return i
+        return len(sections) - 1
+
+    def _render_shot(shots, t_local, idx):
+        img = shots[int(t_local / 4.0) % len(shots)] if len(shots) > 1 else shots[0]
+        frame = _zoom_pulse(img, t_local, idx)
+        frame = _apply_overlay(frame, opacity=DIM)
+        return _apply_vignette(frame)
 
     def make_frame(t):
-        # ── Which image slot are we in? ──────────────────────
-        if n_imgs > 0:
-            slot      = t / SHORTS_IMG_DURATION          # float slot index
-            cur_idx   = int(slot) % n_imgs
-            img_t     = t % SHORTS_IMG_DURATION          # time within slot
-
-            # Ken Burns uses time since this image's slot START (global anchor).
-            # This keeps zoom continuous across the slot boundary — the incoming
-            # image's zoom progresses from wherever the xfade left off, so there
-            # is no snap back to scale=1.0 on the first frame of the new slot.
-            cur_slot_start = int(slot) * SHORTS_IMG_DURATION
-            cur_kb_t  = t - cur_slot_start               # same as img_t, 0-based
-
-            # Render current image with Ken Burns anchored to slot start
-            cur_frame = _zoom_pulse(all_images[cur_idx], cur_kb_t, cur_idx)
-            cur_frame = _apply_overlay(cur_frame, opacity=0.45)
-            cur_frame = _apply_vignette(cur_frame)
-
-            # ── Crossfade zone: blend into next image ────────
-            xfade_start = SHORTS_IMG_DURATION - xfade_dur
-            if img_t >= xfade_start and n_imgs > 1:
-                # alpha: 0.0 at xfade_start → 1.0 at end of slot
-                raw_alpha = (img_t - xfade_start) / xfade_dur
-                # Smoothstep for a more cinematic S-curve blend
-                alpha = raw_alpha * raw_alpha * (3.0 - 2.0 * raw_alpha)
-
-                next_idx      = (cur_idx + 1) % n_imgs
-                next_slot_start = (int(slot) + 1) * SHORTS_IMG_DURATION
-                # next image's Ken Burns time: how far past its slot start are we?
-                # At xfade_start this is negative (pre-roll), clamp to 0.
-                # This means the next image's zoom starts gently before its slot
-                # begins, so by the time alpha=1 its zoom matches where it will
-                # be at t=0 of its own slot — zero discontinuity.
-                next_kb_t = max(0.0, t - next_slot_start)
-                nxt_frame = _zoom_pulse(all_images[next_idx], next_kb_t, next_idx)
-                nxt_frame  = _apply_overlay(nxt_frame, opacity=0.45)
-                nxt_frame  = _apply_vignette(nxt_frame)
-
-                # Blend
-                frame_np = (cur_frame.astype(np.float32) * (1.0 - alpha) +
-                            nxt_frame.astype(np.float32) * alpha).astype(np.uint8)
-            else:
-                frame_np = cur_frame
+        i = _section_at(t)
+        if _PROGRESS_EVERY:
+            tick = int(t) // _PROGRESS_EVERY
+            if tick != make_frame._last_tick:
+                make_frame._last_tick = tick
+                print(f"   … render t={t:.0f}s / {total_duration:.0f}s", flush=True)
+        t0    = bounds[i]
+        shots = section_shots[i] if i < len(section_shots) else []
+        if shots:
+            frame_np = _render_shot(shots, t - t0, i)
+            # ease in from the previous section's visual at the boundary
+            if t - t0 < XFADE and i > 0:
+                prev = section_shots[i - 1]
+                if prev:
+                    prev_dur = t0 - bounds[i - 1]
+                    a = (t - t0) / XFADE
+                    a = a * a * (3.0 - 2.0 * a)  # smoothstep
+                    pf = _render_shot(prev, prev_dur, i - 1)
+                    frame_np = (frame_np.astype(np.float32) * a +
+                                pf.astype(np.float32) * (1.0 - a)).astype(np.uint8)
         else:
             frame_np = _gradient_bg(t)
 
@@ -732,19 +725,18 @@ def _build_shorts_clip(all_images: list, total_duration: float,
         cap_text = _get_caption_at(captions, t)
         frame    = _draw_shorts_caption(frame, cap_text)
 
-        # ── Top brand strip ───────────────────────────────────
+        # ── Top brand strip ──────────────────────────────────
         draw       = ImageDraw.Draw(frame)
         font_brand = _load_font("bold", 30)
-        brand      = "▶ FRACTURED TIMELINES"
+        brand      = "▶ " + config.CHANNEL_NAME.upper()
         bbox       = draw.textbbox((0, 0), brand, font=font_brand)
         bw         = bbox[2] - bbox[0]
         draw.text(((W - bw) // 2, 50), brand, font=font_brand,
                   fill=(255, 255, 255, 160))
 
-        # NOTE: Flash cut indicator removed — crossfades replace hard cuts.
-
         return np.array(frame)
 
+    make_frame._last_tick = -1
     return VideoClip(make_frame, duration=total_duration)
 
 
@@ -783,19 +775,23 @@ def create_video(script: dict, audio_path: str, output_dir: str,
     if is_shorts:
         print(f"\n   Building Shorts ({W}×{H}, {FPS} fps) …")
 
-        # Flatten all section image lists into one ordered list
-        all_images = []
+        # Per-section image lists — kept section-aware so each visual shows
+        # while its own section is narrated (not a blind rotation loop)
+        section_shots = []
         for section in script["sections"]:
             sid   = section["id"]
             paths = (image_map or {}).get(sid, [])
             if isinstance(paths, str):
                 paths = [paths]   # handle single-path fallback
+            shots = []
             for p in paths:
                 arr = _load_bg_image(p)
                 if arr is not None:
-                    all_images.append(arr)
+                    shots.append(arr)
+            section_shots.append(shots)
 
-        if not all_images:
+        n_loaded = sum(len(s) for s in section_shots)
+        if n_loaded == 0:
             print("   ⚠ No images loaded — using animated gradient")
 
         # ── FIX: Load and validate SRT with clear diagnostics ──
@@ -811,15 +807,15 @@ def create_video(script: dict, audio_path: str, output_dir: str,
             print("      To fix: delete narration.mp3 + narration.srt and re-run")
             print("      the Narration step, then re-run Video.")
 
-        print(f"   → {len(all_images)} images → "
-              f"~{len(all_images) * SHORTS_IMG_DURATION:.0f}s slideshow material")
+        for s, shots in zip(script["sections"], section_shots):
+            print(f"   → section {s['id']}: {len(shots)} image(s)")
 
         # Attach audio first to know true duration
         audio      = AudioFileClip(audio_path)
         total_dur  = audio.duration
         print(f"   → Audio duration: {total_dur:.1f}s")
 
-        final = _build_shorts_clip(all_images, total_dur, captions)
+        final = _build_shorts_clip(section_shots, script["sections"], total_dur, captions)
         final = final.set_audio(audio)
 
         output_path = os.path.join(output_dir, "final_short.mp4")

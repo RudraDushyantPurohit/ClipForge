@@ -19,6 +19,8 @@ import config
 # The actual runtime order is determined by build_chain() below,
 # which rotates this list so config.GEMINI_MODEL comes first.
 _ALL_MODELS = [
+    "gemini-3.8-flash",
+    "gemini-3.7-flash",
     "gemini-2.5-flash",
     "gemini-2.5-flash-lite",
     "gemma-4-31b-it",        # Gemma 4 31B dense — strong reasoning, free tier

@@ -1,4 +1,10 @@
 import os
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  YouTube AI Agent Studio — Configuration
@@ -9,22 +15,22 @@ import os
 # ─────────────────────────────────────────
 #  API Keys  (all free-tier)
 # ─────────────────────────────────────────
-GEMINI_API_KEY     = os.getenv("GEMINI_API_KEY",     "YOUR_GEMINI_API_KEY")
-PEXELS_API_KEY     = os.getenv("PEXELS_API_KEY",     "YOUR_PEXELS_API_KEY")
-ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "YOUR_ELEVENLABS_KEY")  # optional
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+PEXELS_API_KEY = os.getenv("PEXELS_API_KEY", "")
+ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "")  # optional
 
 # ─────────────────────────────────────────
 #  Your Channel Identity
 #  The more specific you are, the better the AI's topic suggestions.
 # ─────────────────────────────────────────
 CHANNEL_DESCRIPTION = """
-A mind-bending science and technology channel in the style of Vsauce, Veritasium, and Kurzgesagt.
-We focus heavily on deep, existential "What If" scenarios, the extreme future of Artificial Intelligence,
-theoretical physics, and mind-expanding thought experiments.
-Every video should explore the absolute limits of science, space, or tech, making the viewer question reality.
-Target audience: highly curious thinkers who want their minds blown by deep scientific and philosophical dives.
+A finance channel that turns earnings season into plain-English insight.
+Each video breaks down a company's quarterly earnings report and earnings call — revenue, EPS vs expectations,
+margins, guidance, and the 2-3 takeaways that actually matter — as 60-90 second Shorts and deeper 6-8 minute analyses.
+No hype, no stock picks, no price targets: just what the company reported and what it means, verified against the numbers.
+Target audience: retail investors and curious professionals who want the signal from earnings without reading the 10-Q.
 """
-CHANNEL_NAME = "My AI Channel"   # shown on-screen and in upload metadata
+CHANNEL_NAME = "Beat or Miss"   # shown on-screen and in upload metadata   # shown on-screen and in upload metadata
 
 # ─────────────────────────────────────────
 #  Voice (Edge TTS — free, no API key)
@@ -50,7 +56,7 @@ VOICE_PITCH = "-3Hz"    # slightly deeper = more cinematic
 #    gemini-2.0-flash-lite   — fastest           (1500 req/day)
 #    gemini-1.5-flash-001    — reliable fallback (1500 req/day)
 # ─────────────────────────────────────────
-GEMINI_MODEL = "gemini-2.0-flash"
+GEMINI_MODEL = "gemini-3.8-flash"
 
 # ─────────────────────────────────────────
 #  Video Dimensions
