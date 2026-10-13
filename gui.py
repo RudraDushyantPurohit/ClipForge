@@ -681,6 +681,8 @@ def upload():
 @app.route("/api/settings")
 def get_settings():
     return jsonify({
+        "llm_backend":     getattr(config, "LLM_BACKEND", "agy"),
+        "agy_model":       getattr(config, "AGY_MODEL", "gemini-3.8-flash-high"),
         "gemini_key":      config.GEMINI_API_KEY,
         "pexels_key":      config.PEXELS_API_KEY,
         "music_enabled":   getattr(config, "MUSIC_ENABLED", True),
@@ -707,6 +709,8 @@ def save_settings():
     body = request.get_json(force=True) or {}
     # Update live config object
     m = {
+        "llm_backend":   "LLM_BACKEND",
+        "agy_model":     "AGY_MODEL",
         "gemini_key":    "GEMINI_API_KEY",
         "pexels_key":    "PEXELS_API_KEY",
         "music_enabled": "MUSIC_ENABLED",

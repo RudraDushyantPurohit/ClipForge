@@ -189,16 +189,30 @@ def _write_shorts_script(research: dict) -> dict:
     """
     Generates a tight 50-60 second YouTube Shorts script (3 sections, vertical format).
     """
-    key_points_str = "\n".join(f"  {i+1}. {p}" for i, p in enumerate(research["key_points"][:3]))
+    key_points_str = "\n".join(f"  {i+1}. {p}" for i, p in enumerate(research.get("key_points", [])[:3]))
 
-    prompt = f"""You are a viral YouTube Shorts scriptwriter. You write punchy, addictive 50-60 second vertical videos.
+    earnings_fact_section = ""
+    if "scorecard" in research or "price_trend" in research:
+        earnings_fact_section = f"""
+VERIFIED FINANCIAL FACTS:
+- Price Trend: {json.dumps(research.get('price_trend', {}))}
+- Scorecard (Revenue & EPS): {json.dumps(research.get('scorecard', {}))}
+- Takeaway (Guidance & Sentiment): {json.dumps(research.get('takeaway', {}))}
 
-Video topic: {research["topic"]}
-Title: {research["video_title"]}
+RULES FOR FINANCIAL SHORTS:
+- Section 1 (Hook/Verdict): Open with whether the quarter was a BEAT or MISS and the immediate stock price reaction.
+- Section 2 (The Numbers): Report the exact revenue and EPS numbers vs expectations and highlight key operating numbers.
+- Section 3 (Takeaway/CTA): Give the guidance verdict (raised or cut), key sentiment takeaway, and call-to-action.
+"""
+
+    prompt = f"""You are a viral YouTube Shorts scriptwriter for the finance channel 'Beat or Miss'. You write punchy, addictive 50-60 second vertical videos.
+
+Video topic: {research.get("topic", "")}
+Title: {research.get("video_title", "")}
 Hook question: {research.get("hook_question", "")}
 Key points:
 {key_points_str}
-
+{earnings_fact_section}
 Write a GRIPPING 50-60 second Shorts script. Rules:
 - Hooks in the FIRST 3 words — no slow intros
 - Short, punchy sentences. Every second counts.

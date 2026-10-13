@@ -58,6 +58,10 @@ VOICE_PITCH = "-3Hz"    # slightly deeper = more cinematic
 # ─────────────────────────────────────────
 GEMINI_MODEL = "gemini-3.8-flash"
 
+# LLM Backend: "agy" (Antigravity CLI in terminal, no API key required) or "gemini_api"
+LLM_BACKEND = os.getenv("LLM_BACKEND", "agy")
+AGY_MODEL   = os.getenv("AGY_MODEL", "gemini-3.8-flash-high")
+
 # ─────────────────────────────────────────
 #  Video Dimensions
 # ─────────────────────────────────────────

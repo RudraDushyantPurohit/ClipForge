@@ -10,14 +10,13 @@ Free-tier daily limits (approximate):
   gemini-1.5-flash-001  → 1,500 req/day
 If ALL are exhausted, wait until midnight Pacific and try again.
 """
+import os
+import shutil
+import subprocess
 import time
-from google import genai
-from google.genai import types
 import config
 
-# Full list of supported models in preference order.
-# The actual runtime order is determined by build_chain() below,
-# which rotates this list so config.GEMINI_MODEL comes first.
+# Full list of supported models in preference order for the API fallback chain.
 _ALL_MODELS = [
     "gemini-3.8-flash",
     "gemini-3.7-flash",
@@ -30,6 +29,55 @@ _ALL_MODELS = [
     "gemini-1.5-flash-001",
     "gemini-1.5-pro-001",
 ]
+
+
+def _find_agy_executable() -> str:
+    """Find agy executable in PATH or standard installation paths."""
+    found = shutil.which("agy") or shutil.which("agy.exe")
+    if found:
+        return found
+    candidates = [
+        os.path.expandvars(r"%LOCALAPPDATA%\agy\bin\agy.exe"),
+        os.path.expanduser(r"~/.gemini/antigravity-cli/bin/agy.exe"),
+        r"C:\Users\siddh\AppData\Local\agy\bin\agy.exe",
+    ]
+    for c in candidates:
+        if os.path.isfile(c):
+            return c
+    return "agy"
+
+
+def _generate_via_agy(prompt: str, model: str | None = None, enable_tools: bool = False) -> str:
+    """Execute prompt non-interactively via Antigravity CLI (agy)."""
+    agy_cmd = _find_agy_executable()
+    selected_model = model or getattr(config, "AGY_MODEL", "gemini-3.8-flash-high")
+
+    cmd = [
+        agy_cmd,
+        "--input-format", "text",
+        "--output-format", "text",
+        "--disable-slash-commands",
+    ]
+    if enable_tools:
+        cmd.append("--dangerously-skip-permissions")
+    if selected_model:
+        cmd.extend(["--model", selected_model])
+
+    proc = subprocess.Popen(
+        cmd,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+    )
+    stdout, stderr = proc.communicate(input=prompt)
+
+    if proc.returncode != 0:
+        err_msg = stderr.strip() or stdout.strip()
+        raise RuntimeError(f"agy CLI execution failed (code {proc.returncode}):\n{err_msg}")
+
+    return stdout.strip()
 
 
 def build_chain(starting_model: str | None = None) -> list:
@@ -47,9 +95,10 @@ def build_chain(starting_model: str | None = None) -> list:
 _client = None
 
 
-def _get_client() -> genai.Client:
+def _get_client():
     global _client
     if _client is None:
+        from google import genai
         _client = genai.Client(api_key=config.GEMINI_API_KEY)
     return _client
 
@@ -65,7 +114,8 @@ def _should_switch_model(err: Exception) -> bool:
     ])
 
 
-def generate(prompt: str, starting_model: str | None = None) -> str:
+def _generate_via_gemini_api(prompt: str, starting_model: str | None = None) -> str:
+    from google.genai import types
     client = _get_client()
     chain  = build_chain(starting_model or getattr(config, "GEMINI_MODEL", None))
 
@@ -97,3 +147,14 @@ def generate(prompt: str, starting_model: str | None = None) -> str:
         "    • 429 = quota — wait until midnight Pacific or add billing\n"
         "      https://aistudio.google.com/apikey\n"
     )
+
+
+def generate(prompt: str, starting_model: str | None = None, enable_tools: bool = False) -> str:
+    """
+    Generate text using configured LLM_BACKEND ("agy" or "gemini_api").
+    Defaults to Antigravity CLI ('agy') in headless mode.
+    """
+    backend = getattr(config, "LLM_BACKEND", "agy").lower()
+    if backend == "agy":
+        return _generate_via_agy(prompt, model=starting_model, enable_tools=enable_tools)
+    return _generate_via_gemini_api(prompt, starting_model=starting_model)

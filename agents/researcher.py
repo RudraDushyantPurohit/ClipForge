@@ -9,6 +9,15 @@ import os
 import re
 import random
 import time
+import sys
+
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
+import config
 from agents.gemini_client import generate
 
 # Path to the banned-topics file (sits next to this package's parent directory)
@@ -73,36 +82,140 @@ def save_banned_topics(topics: list) -> None:
             f.write(t + "\n")
 
 
+def extract_earnings_tags(text: str) -> tuple[str, str, str] | None:
+    """Extract (ticker, quarter, fy) from topic string if present."""
+    if not text:
+        return None
+    m = re.search(r'\b([A-Za-z]{1,5})\b.*?\b(Q[1-4])\b.*?\b(FY\d{2,4}|20\d{2})\b', text, re.IGNORECASE)
+    if m:
+        return m.group(1).upper(), m.group(2).upper(), m.group(3).upper()
+    m2 = re.search(r'([A-Za-z]{1,5})-q([1-4])-(\w+)', text, re.IGNORECASE)
+    if m2:
+        return m2.group(1).upper(), f"Q{m2.group(2)}", m2.group(3).upper()
+    return None
+
+
 def research_topic(channel_description: str,
                    topic_override: str = "",
                    focus_angle: str = "") -> dict:
     """
     Research a video topic for the channel.
-
-    Parameters
-    ----------
-    channel_description : the channel's style / audience description from config.py
-    topic_override      : if non-empty, Gemini is told to write a video about
-                          THIS EXACT topic — no random angle, no creative
-                          interpretation. The bug fix: previously this was
-                          prepended to channel_description and then ignored
-                          because the random_angle prompt dominated.
-    focus_angle         : if non-empty (and topic_override is empty), use this
-                          angle instead of picking one randomly. Allows the GUI
-                          dropdown to steer AI picks without locking the topic.
     """
     banned     = load_banned_topics()
     banned_str = ", ".join(f'"{t}"' for t in banned)
 
     # ── MODE 1: USER-SPECIFIED EXACT TOPIC ───────────────────────────────────
-    # The old bug: topic_override was prepended to channel_description, but the
-    # prompt still said "Focus on: >>> {random_angle} <<<" so Gemini ignored it.
-    # Fix: bypass the angle system entirely and issue a direct instruction.
     if topic_override.strip():
         exact_topic = topic_override.strip()
         print(f"   → Exact topic override: \"{exact_topic}\"")
 
-        prompt = f"""You are a top YouTube content strategist for a viral science/tech channel.
+        earnings_info = extract_earnings_tags(exact_topic)
+        if earnings_info:
+            ticker, quarter, fy = earnings_info
+            print(f"   → Detected Earnings Subject: {ticker} {quarter} {fy}")
+            prompt = f"""You are a top Wall Street financial analyst and content strategist for '{config.CHANNEL_NAME}'.
+Channel description:
+{channel_description}
+
+MANDATORY INSTRUCTION: Conduct research on this quarterly earnings report:
+>>> {exact_topic} <<<
+
+CRITICAL INSTRUCTIONS:
+1. Provide the VERIFIED earnings actuals for {ticker} for {quarter} {fy} (Revenue, Adj EPS, Beat vs Miss, Guidance, Operating Highlights).
+2. Never substitute estimates for verified actuals.
+3. Structure the output with accurate financial metrics for the 3 'Beat or Miss' section cards:
+   - "price_trend": subtitle, metrics (YTD, 3M, 1M, 1W, Day, Reaction with positive true/false), day_levels (list of strings), reaction_box (title, subtitle, positive)
+   - "scorecard": subtitle, revenue (label, est, actual, verdict, yoy), eps (label, est, actual, verdict), operating_numbers (list of {{"title": "...", "subtitle": "..."}})
+   - "takeaway": subtitle, verdict_banner, guidance (verdict, points with {{"title": "...", "subtitle": "..."}}), capital_return (title, details, subtitle), sentiment_drivers (list of strings)
+4. Include gripping YouTube title, SEO description, hook question, 5 key points, and tags.
+
+Respond with ONLY a valid JSON object. No markdown fences, no explanation:
+{{
+  "ticker": "{ticker}",
+  "quarter": "{quarter}",
+  "fy": "{fy}",
+  "topic": "{exact_topic}",
+  "why_now": "Why this earnings report matters right now",
+  "video_title": "{ticker} {quarter} {fy} Earnings: Beat or Miss?",
+  "description": "2-sentence YouTube description optimized for SEO and curiosity",
+  "hook_question": "The single most critical question this quarterly earnings report answers",
+  "key_points": [
+    "Revenue actual vs consensus estimate",
+    "EPS performance and margin trends",
+    "Key operating metrics and segment highlights",
+    "Guidance verdict and forward targets",
+    "Primary takeaway and stock reaction"
+  ],
+  "target_audience": "Retail investors and market watchers",
+  "tags": ["{ticker}", "Stocks", "Earnings", "{quarter}", "{fy}", "Investing", "Finance"],
+  "thumbnail_concept": "{ticker} stock chart with BEAT or MISS verdict badge",
+  "estimated_virality": "high",
+  "price_trend": {{
+    "subtitle": "Price action & trend into the print",
+    "metrics": [
+      {{"label": "YTD", "value": "+12.5%", "positive": true}},
+      {{"label": "3M", "value": "+4.2%", "positive": true}},
+      {{"label": "1M", "value": "-1.5%", "positive": false}},
+      {{"label": "1W", "value": "-0.8%", "positive": false}},
+      {{"label": "Day", "value": "-1.2%", "positive": false}},
+      {{"label": "Reaction", "value": "+2.8%", "positive": true}}
+    ],
+    "day_levels": [
+      "Prior close to reaction move",
+      "Distance from 52-week high",
+      "Key moving average levels"
+    ],
+    "reaction_box": {{
+      "title": "Earnings Reaction: +2.8%",
+      "subtitle": "Reaction on verified numbers",
+      "positive": true
+    }}
+  }},
+  "scorecard": {{
+    "subtitle": "Actual vs analyst expectations",
+    "revenue": {{
+      "label": "Revenue ($B)",
+      "est": "10.0",
+      "actual": "10.2",
+      "verdict": "BEAT",
+      "yoy": "+5% YoY"
+    }},
+    "eps": {{
+      "label": "Adj. EPS",
+      "est": "1.20",
+      "actual": "1.25",
+      "verdict": "BEAT"
+    }},
+    "operating_numbers": [
+      {{"title": "Core revenue expansion", "subtitle": "Volume and pricing growth"}},
+      {{"title": "Operating margin progression", "subtitle": "Operational leverage"}},
+      {{"title": "Segment growth", "subtitle": "Key division performance"}}
+    ]
+  }},
+  "takeaway": {{
+    "subtitle": "The Verdict & Outlook",
+    "verdict_banner": "PRINT: BEAT  -  GUIDANCE: RAISED",
+    "guidance": {{
+      "verdict": "RAISED",
+      "points": [
+        {{"title": "FY revenue guidance updated", "subtitle": "Reflecting strong momentum"}},
+        {{"title": "Full-year EPS outlook raised", "subtitle": "Margin strength continuing"}}
+      ]
+    }},
+    "capital_return": {{
+      "title": "Dividend & Share Repurchases",
+      "details": "Consistent shareholder returns",
+      "subtitle": "Capital returns active"
+    }},
+    "sentiment_drivers": [
+      "Management commentary on demand trends",
+      "Wall Street analyst reactions and price targets",
+      "Key catalysts for the upcoming quarter"
+    ]
+  }}
+}}"""
+        else:
+            prompt = f"""You are a top YouTube content strategist for a viral science/tech channel.
 
 Channel description:
 {channel_description}
@@ -138,6 +251,7 @@ Respond with ONLY a valid JSON object. No markdown fences, no explanation:
   "thumbnail_concept": "Describe the perfect YouTube thumbnail for this topic",
   "estimated_virality": "high"
 }}"""
+
 
         raw = generate(prompt)
         raw = re.sub(r"^```(?:json)?", "", raw).strip()

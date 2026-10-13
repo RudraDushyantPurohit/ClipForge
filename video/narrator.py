@@ -7,10 +7,53 @@ Compatible with all edge-tts versions (6.0 → 7.x).
 Uses MoviePy's AudioFileClip for duration — guaranteed to match the video render.
 """
 import os
+import sys
 import re
 import asyncio
 import edge_tts
 import config
+
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+if hasattr(sys.stderr, "reconfigure"):
+    try:
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
+# ── Patch edge_tts for Microsoft endpoint change (Oct 2026) ───────────────────
+try:
+    import edge_tts.communicate
+    import edge_tts.constants
+    import edge_tts.drm
+    from email.utils import parsedate_to_datetime
+    from datetime import timezone as tz
+
+    # Switch to api.msedgeservices.com endpoint with Ocp-Apim-Subscription-Key
+    # (speech.platform.bing.com readaloud endpoint now returns HTTP 403 Forbidden worldwide)
+    NEW_WSS_URL = (
+        "wss://api.msedgeservices.com/tts/cognitiveservices/websocket/v1"
+        f"?Ocp-Apim-Subscription-Key={edge_tts.constants.TRUSTED_CLIENT_TOKEN}"
+    )
+    edge_tts.constants.WSS_URL = NEW_WSS_URL
+    edge_tts.communicate.WSS_URL = NEW_WSS_URL
+
+    # Robust RFC 2616 HTTP date parsing across all system locales
+    def _safe_parse_date(date: str):
+        try:
+            parsed = parsedate_to_datetime(date)
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=tz.utc)
+            return parsed.timestamp()
+        except Exception:
+            return None
+    edge_tts.drm.DRM.parse_rfc2616_date = _safe_parse_date
+except Exception:
+    pass
+
 
 
 # ══════════════════════════════════════════════════════════════
@@ -211,12 +254,21 @@ async def _synthesise(text: str, audio_path: str, srt_path: str) -> int:
     Tries SubMaker → raw WordBoundary events → sentence fallback.
     Returns the number of SRT cues written.
     """
-    communicate = edge_tts.Communicate(
-        text,
-        config.VOICE_ID,
-        rate=config.VOICE_RATE,
-        pitch=config.VOICE_PITCH,
-    )
+    try:
+        communicate = edge_tts.Communicate(
+            text,
+            config.VOICE_ID,
+            rate=config.VOICE_RATE,
+            pitch=config.VOICE_PITCH,
+            boundary="WordBoundary",
+        )
+    except TypeError:
+        communicate = edge_tts.Communicate(
+            text,
+            config.VOICE_ID,
+            rate=config.VOICE_RATE,
+            pitch=config.VOICE_PITCH,
+        )
 
     # Instantiate SubMaker (may not exist in very old edge-tts)
     try:

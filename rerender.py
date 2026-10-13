@@ -1,10 +1,11 @@
-"""Re-render the video from existing outputs with (new) manual images.
+"""Re-render the video from existing outputs with (new) manual images or cards.
 
-Skips research/script/narration — reuses output/script.json and
-output/narration.mp3 from the last pipeline run. Useful when you only
-changed the images.
+Skips research/script/narration — reuses script.json and narration.mp3
+from the specified run directory or output/.
 
-Run:  python rerender.py --images-dir "path/to/images"
+Run:
+    python rerender.py --run pep-q3-2026
+    python rerender.py --images-dir "assets/pep-q3-2026"
 """
 import argparse
 import json
@@ -20,27 +21,44 @@ from video.creator import create_video
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Re-render video with manual images")
-    ap.add_argument("--images-dir", required=True,
+    ap = argparse.ArgumentParser(description="Re-render video with manual images or section cards")
+    ap.add_argument("--run", default="",
+                    help="Run tag to re-render, e.g. 'pep-q3-2026' (looks in output/<run> and assets/<run>)")
+    ap.add_argument("--images-dir", default="",
                     help="Folder of per-section images (1.png, 2.png, ...)")
-    ap.add_argument("--script", default=os.path.join(config.OUTPUT_DIR, "script.json"))
-    ap.add_argument("--audio", default=os.path.join(config.OUTPUT_DIR, "narration.mp3"))
+    ap.add_argument("--script", default="",
+                    help="Path to script.json override")
+    ap.add_argument("--audio", default="",
+                    help="Path to narration.mp3 override")
     args = ap.parse_args()
     _vc._PROGRESS_EVERY = 5  # progress print every 5s of video
 
-    if not os.path.isfile(args.script):
-        sys.exit(f"script not found: {args.script} — run pipeline.py first")
-    if not os.path.isfile(args.audio):
-        sys.exit(f"audio not found: {args.audio} — run pipeline.py first")
-    if not os.path.isdir(args.images_dir):
-        sys.exit(f"images dir not found: {args.images_dir}")
+    # Determine paths
+    if args.run:
+        run_output = os.path.join(config.OUTPUT_DIR, args.run)
+        script_path = args.script or os.path.join(run_output, "script.json")
+        audio_path  = args.audio  or os.path.join(run_output, "narration.mp3")
+        images_dir  = args.images_dir or os.path.join("assets", args.run)
+        target_out  = run_output
+    else:
+        script_path = args.script or os.path.join(config.OUTPUT_DIR, "script.json")
+        audio_path  = args.audio  or os.path.join(config.OUTPUT_DIR, "narration.mp3")
+        images_dir  = args.images_dir
+        target_out  = config.OUTPUT_DIR
 
-    with open(args.script, encoding="utf-8") as f:
+    if not os.path.isfile(script_path):
+        sys.exit(f"script not found: {script_path} — run pipeline.py first")
+    if not os.path.isfile(audio_path):
+        sys.exit(f"audio not found: {audio_path} — run pipeline.py first")
+    if not images_dir or not os.path.isdir(images_dir):
+        sys.exit(f"images dir not found: {images_dir}")
+
+    with open(script_path, encoding="utf-8") as f:
         script = json.load(f)
 
-    image_map = _load_manual_images(script, args.images_dir)
-    out = create_video(script, args.audio, config.OUTPUT_DIR, image_map)
-    print(f"\n  ✅ Re-rendered: {os.path.abspath(out)}")
+    image_map = _load_manual_images(script, images_dir)
+    out = create_video(script, audio_path, target_out, image_map)
+    print(f"\n  [OK] Re-rendered: {os.path.abspath(out)}")
 
 
 if __name__ == "__main__":
