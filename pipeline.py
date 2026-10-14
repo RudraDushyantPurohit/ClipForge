@@ -221,8 +221,9 @@ def run():
 
     # ── 5. Video ──────────────────────────────────────────────
     banner("5 / 6  ·  Building video  [MoviePy]")
-    video_path = os.path.join(run_output_dir, "final_video.mp4")
-    skip_video = from_step_num > 5 and os.path.isfile(video_path) and os.path.getsize(video_path) > 0
+    video_filename = "final_short.mp4" if args.shorts else "final_video.mp4"
+    video_path = os.path.join(run_output_dir, video_filename)
+    skip_video = (args.resume or from_step_num > 5) and os.path.isfile(video_path) and os.path.getsize(video_path) > 0
     if skip_video:
         print(f"   → [RESUME] Reusing existing video: {video_path}")
     else:

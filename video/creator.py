@@ -883,16 +883,36 @@ def create_video(script: dict, audio_path: str, output_dir: str,
     print(f"\n   → Rendering {total_secs // 60}m {total_secs % 60}s video…")
     print(f"      (~{max(1, total_secs // 10)} min — go get a coffee ☕)\n")
 
-    final.write_videofile(
-        output_path,
-        fps=FPS,
-        codec="libx264",
-        audio_codec="aac",
-        threads=4,
-        preset=getattr(config, "RENDER_PRESET", "ultrafast"),
-        verbose=False,
-        logger=None,
-    )
+    try:
+        final.write_videofile(
+            output_path,
+            fps=FPS,
+            codec="libx264",
+            audio_codec="aac",
+            threads=4,
+            preset=getattr(config, "RENDER_PRESET", "ultrafast"),
+            verbose=False,
+            logger=None,
+            remove_temp=False,
+        )
+    finally:
+        try:
+            final.close()
+        except Exception:
+            pass
+        if "audio" in locals() and audio is not None:
+            try:
+                audio.close()
+            except Exception:
+                pass
+
+    # Clean up any leftover temporary audio files left by MoviePy on Windows
+    for item in os.listdir("."):
+        if "TEMP_MPY" in item:
+            try:
+                os.remove(item)
+            except Exception:
+                pass
 
     size_mb = os.path.getsize(output_path) // (1024 * 1024)
     print(f"\n   ✅ Video rendered: {output_path} ({size_mb} MB)")
